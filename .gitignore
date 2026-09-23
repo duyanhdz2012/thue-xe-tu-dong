@@ -9,3 +9,5 @@ uploads/
 tmp/
 tools/
 /thue-xe-tu-dong/
+
+*.tsbuildinfo

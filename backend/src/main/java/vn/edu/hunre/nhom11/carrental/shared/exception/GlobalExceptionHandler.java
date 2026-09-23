@@ -26,6 +26,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(body);
     }
 
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    ResponseEntity<?> conflict(Exception e) {
+        return ResponseEntity.status(409).body(error(409, "Dữ liệu bị trùng hoặc đang được sử dụng. Hãy kiểm tra tên, biển số; xe có đơn thuê nên chuyển sang ngừng hoạt động thay vì xóa."));
+    }
+
     private Map<String, Object> error(int status, String message) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", Instant.now()); body.put("status", status); body.put("message", message); return body;

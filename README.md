@@ -49,3 +49,16 @@ java -jar target/car-rental-1.0.0.jar --spring.profiles.active=mysql
 ```
 
 Environment variables can override `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, and `NEXT_PUBLIC_API_URL`.
+
+## Quản lý danh mục xe
+
+- `/cars`: tìm theo tên, lọc hãng/loại, sắp xếp giá hoặc tên và phân trang.
+- `/cars/{id}`: thông tin xe, giá thuê, ảnh đại diện và đặt xe khi xe sẵn sàng.
+- `/admin/cars`: đăng nhập bằng tài khoản ADMIN để thêm/sửa/xóa xe, hãng và loại xe.
+- Giá thuê là VNĐ/ngày, phải lớn hơn 0. Biển số không được trùng.
+- Mỗi xe có một ảnh đại diện: nhập URL HTTP/HTTPS để xem trước, đổi hoặc xóa URL để bỏ ảnh. Chưa hỗ trợ tải tệp ảnh trực tiếp.
+- Hãng/loại đang được xe sử dụng và xe đã có đơn thuê không thể xóa; có thể đổi trạng thái xe thành Ngừng hoạt động.
+- API ghi dữ liệu yêu cầu quyền ADMIN; dữ liệu không hợp lệ trả 400, không tìm thấy trả 404, trùng/lỗi liên kết trả 409.
+
+Kiểm tra: `cd backend && mvn test`; `cd frontend && pnpm build`.
+Dữ liệu H2 mặc định chỉ dành cho chạy thử và mất khi khởi động lại. Dùng profile MySQL để lưu lâu dài.
