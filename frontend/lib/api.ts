@@ -1,4 +1,6 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? (typeof window !== "undefined" ? "" : "http://127.0.0.1:8080");
+
 export type Session = {token:string;id:number;name:string;email:string;role:"ADMIN"|"CUSTOMER"};
 export function getSession():Session|null{if(typeof window==="undefined")return null;try{return JSON.parse(localStorage.getItem("carRentalSession")||"null")}catch{return null}}
 export function setSession(value:Session|null){if(value)localStorage.setItem("carRentalSession",JSON.stringify(value));else localStorage.removeItem("carRentalSession")}

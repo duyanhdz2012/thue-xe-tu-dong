@@ -1,0 +1,18 @@
+"use client";
+
+import Link from "next/link";
+import {useEffect,useState} from "react";
+import {api,getSession} from "@/lib/api";
+
+type Profile={id:number;name:string;email:string;phone:string;address:string;role:string};
+
+export default function Account(){
+ const[form,setForm]=useState<Profile|null>(null),[idCard,setIdCard]=useState(""),[error,setError]=useState(""),[success,setSuccess]=useState(""),[busy,setBusy]=useState(false);
+ useEffect(()=>{if(!getSession()){location.href="/login";return}api<Profile>("/api/users/me").then(setForm).catch(e=>setError(e.message))},[]);
+ async function saveProfile(e:React.FormEvent){e.preventDefault();if(!form)return;try{setBusy(true);setError("");setSuccess("");const p=await api<Profile>("/api/users/me",{method:"PUT",body:JSON.stringify({name:form.name,phone:form.phone,address:form.address})});setForm(p);setSuccess("✓ Cập nhật thông tin cá nhân thành công!")}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+ return <section className="customer-area">
+  <div className="customer-hero"><div className="customer-hero-inner"><div><div className="eyebrow"style={{color:"#34d399"}}>TRUNG TÂM KHÁCH HÀNG</div><h1>Hồ sơ & Tài khoản</h1><p>Quản lý thông tin cá nhân để việc xác nhận, thanh toán và bàn giao xe nhanh chóng.</p></div><Link href="/bookings"className="button outline"style={{color:"#fff",borderColor:"rgba(255,255,255,.25)"}}>Xem đơn thuê xe</Link></div></div>
+  <div className="customer-layout"><aside className="customer-nav"><Link className="active"href="/account">Thông tin cá nhân</Link><Link href="/bookings">Đơn thuê của tôi</Link><Link href="/cars">Đặt thêm xe mới</Link></aside><div className="customer-card-box"><div className="profile-header-card"><div className="profile-avatar-circle">{form?.name?.split(" ").slice(-1)[0]?.charAt(0)||"K"}</div><div className="profile-header-info"><h2>{form?.name||"Khách hàng"}</h2><div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}><span className="pill">Mã khách hàng: KH-{String(form?.id||1).padStart(4,"0")}</span><span className="pill"style={{background:"#ecfdf5",color:"var(--primary)"}}>✓ Đã kích hoạt tài khoản</span></div></div></div>
+   <div className="profile-form-body"><h3 style={{fontSize:18,fontWeight:800,margin:"0 0 20px"}}>Hồ sơ thông tin liên hệ</h3>{form?<form onSubmit={saveProfile}><div className="form-grid-2"><div className="form-group"><label>Họ và tên khách hàng</label><input required value={form.name}onChange={e=>setForm({...form,name:e.target.value})}/></div><div className="form-group"><label>Email đăng nhập <small>(Cố định)</small></label><input type="email"disabled value={form.email}/></div><div className="form-group"><label>Số điện thoại liên hệ</label><input type="tel"required value={form.phone||""}onChange={e=>setForm({...form,phone:e.target.value})}placeholder="VD: 0988 123 456"/></div><div className="form-group"><label>Số CCCD / Hộ chiếu</label><input value={idCard}onChange={e=>setIdCard(e.target.value)}placeholder="Nhập số CCCD gắn chip (12 số)"/></div><div className="form-group col-span-2"><label>Địa chỉ nhận xe / Thường trú</label><input required value={form.address||""}onChange={e=>setForm({...form,address:e.target.value})}placeholder="Số nhà, đường, quận/huyện, tỉnh/thành"/></div></div>{error&&<div className="error-notice">{error}</div>}{success&&<div className="notice">{success}</div>}<div className="form-actions-row"><button disabled={busy}className="button">{busy?"Đang lưu...":"Lưu thông tin cá nhân"}</button></div></form>:<div className="loading">Đang tải hồ sơ khách hàng...</div>}</div>
+  </div></div>
+ </section>}

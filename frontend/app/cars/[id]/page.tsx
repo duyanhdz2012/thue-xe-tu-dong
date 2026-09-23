@@ -1,4 +1,277 @@
 "use client";
-import{useEffect,useState,use}from"react";import{api,money,getSession}from"@/lib/api";import{Car}from"@/components/CarCard";
-export default function Detail({params}:{params:Promise<{id:string}>}){const{id}=use(params);const[car,setCar]=useState<Car|null>(null);const[msg,setMsg]=useState("");const[pickup,setPickup]=useState("");const[returned,setReturned]=useState("");useEffect(()=>{api<Car>(`/api/cars/${id}`).then(setCar)},[id]);async function book(){if(!getSession()){location.href="/login";return}try{await api("/api/bookings",{method:"POST",body:JSON.stringify({carId:Number(id),pickupDate:pickup,returnDate:returned,pickupLocation:car?.location,returnLocation:car?.location})});setMsg("Đặt xe thành công. Chúng tôi sẽ sớm xác nhận đơn của bạn.")}catch(e){setMsg((e as Error).message)}}if(!car)return <div className="loading">Đang tải thông tin xe...</div>;return <section className="detail"><div className="detail-image"style={{backgroundImage:`url(${car.imageUrl})`}}></div><div className="detail-copy"><div className="eyebrow">{car.brand.name} · {car.carType.name}</div><h1>{car.name}</h1><p>{car.description}</p><div className="specs"><span><b>{car.carType.seats}</b> chỗ ngồi</span><span><b>{car.modelYear}</b> đời xe</span><span><b>{car.location}</b> nhận xe</span></div><div className="price">{money(car.dailyPrice)} <small>/ ngày</small></div><div className="date-grid"><label>Ngày nhận<input type="date"value={pickup}onChange={e=>setPickup(e.target.value)}/></label><label>Ngày trả<input type="date"value={returned}onChange={e=>setReturned(e.target.value)}/></label></div><button className="button"onClick={book}>Đặt xe ngay</button>{msg&&<p className="notice">{msg}</p>}</div></section>}
 
+import { useEffect, useState, use } from "react";
+import Link from "next/link";
+import { api, money, getSession } from "@/lib/api";
+import { Car } from "@/components/CarCard";
+
+const FALLBACK_DETAIL_IMAGES = [
+  "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=1200&q=80",
+  "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=1200&q=80",
+  "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80"
+];
+
+type BookingResult={id:number;totalAmount:number;paidAmount:number;car:{name:string}};
+type Profile={name:string;email:string;phone:string;address:string};
+type PaymentResult={transactionCode:string};
+const PAYMENT_METHODS:Record<string,string>={BANK_TRANSFER:"Chuyển khoản ngân hàng",MOMO:"Ví MoMo",VNPAY:"VNPay",CASH:"Tiền mặt tại quầy"};
+
+export default function Detail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const [car, setCar] = useState<Car | null>(null);
+  const [msg, setMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [pickup, setPickup] = useState("");
+  const [returned, setReturned] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [imgSrc, setImgSrc] = useState("");
+  const [createdBooking,setCreatedBooking]=useState<BookingResult|null>(null);
+  const [paymentBusy,setPaymentBusy]=useState(false);
+  const [paymentSuccess,setPaymentSuccess]=useState("");
+  const [paymentForm,setPaymentForm]=useState({amount:"",method:"BANK_TRANSFER",payerName:"",payerEmail:"",payerPhone:"",billingAddress:"",provider:"Vietcombank",note:""});
+
+  useEffect(() => {
+    api<Car>(`/api/cars/${id}`)
+      .then((data) => {
+        setCar(data);
+        const fallbackImg = FALLBACK_DETAIL_IMAGES[Math.abs(Number(id)) % FALLBACK_DETAIL_IMAGES.length];
+        setImgSrc(data.imageUrl && data.imageUrl.startsWith("http") ? data.imageUrl : fallbackImg);
+      })
+      .catch(() => {
+        // Fallback demo car nếu API chưa chạy
+        const fallbackImg = FALLBACK_DETAIL_IMAGES[Math.abs(Number(id)) % FALLBACK_DETAIL_IMAGES.length];
+        setCar({
+          id: Number(id),
+          name: "Mazda 3 Premium 2023",
+          licensePlate: "30G-888.99",
+          dailyPrice: 900000,
+          description: "Sedan thể thao sang trọng bậc nhất, nội thất bọc da cao cấp, trang bị hệ thống an toàn i-Activesense, cửa sổ trời, dàn âm thanh Bose 12 loa.",
+          imageUrl: fallbackImg,
+          location: "Hà Nội",
+          modelYear: 2023,
+          status: "AVAILABLE",
+          brand: { name: "Mazda" },
+          carType: { name: "Sedan C", seats: 5 }
+        });
+        setImgSrc(fallbackImg);
+      });
+  }, [id]);
+
+  // Calculate rental duration in days
+  const calculateDays = () => {
+    if (!pickup || !returned) return 1;
+    const start = new Date(pickup).getTime();
+    const end = new Date(returned).getTime();
+    if (isNaN(start) || isNaN(end) || end < start) return 1;
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays === 0 ? 1 : diffDays;
+  };
+
+  const days = calculateDays();
+  const totalPrice = car ? car.dailyPrice * days : 0;
+
+  async function book() {
+    setErrorMsg("");
+    setMsg("");
+
+    if (!getSession()) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!pickup || !returned) {
+      setErrorMsg("Vui lòng chọn ngày nhận xe và ngày trả xe.");
+      return;
+    }
+
+    if (new Date(returned).getTime() < new Date(pickup).getTime()) {
+      setErrorMsg("Ngày trả xe không thể trước ngày nhận xe.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const booking=await api<BookingResult>("/api/bookings", {
+        method: "POST",
+        body: JSON.stringify({
+          carId: Number(id),
+          pickupDate: pickup,
+          returnDate: returned,
+          pickupLocation: car?.location,
+          returnLocation: car?.location
+        })
+      });
+      setCreatedBooking(booking);
+      setPaymentForm(f=>({...f,amount:String(booking.totalAmount-booking.paidAmount)}));
+      try {
+        const profile=await api<Profile>("/api/users/me");
+        setPaymentForm(f=>({...f,payerName:profile.name,payerEmail:profile.email,payerPhone:profile.phone||"",billingAddress:profile.address||""}));
+      } catch {
+        // Đơn vẫn đã được tạo: giữ biểu mẫu thanh toán mở để khách tự bổ sung thông tin.
+      }
+      setMsg("Đặt xe thành công. Vui lòng hoàn tất thanh toán để xác nhận hành trình.");
+    } catch (e) {
+      setErrorMsg((e as Error).message || "Không thể hoàn tất đặt xe. Vui lòng thử lại.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function pay(e:React.FormEvent){
+    e.preventDefault();if(!createdBooking)return;
+    try{setPaymentBusy(true);setErrorMsg("");const result=await api<PaymentResult>("/api/payments",{method:"POST",body:JSON.stringify({...paymentForm,bookingId:createdBooking.id,amount:Number(paymentForm.amount)})});setPaymentSuccess(`Thanh toán thành công. Mã giao dịch: ${result.transactionCode}`);setMsg("🎉 Đặt xe và thanh toán thành công! Bạn có thể theo dõi hành trình trong Đơn của tôi.")}
+    catch(e){setErrorMsg((e as Error).message||"Không thể hoàn tất thanh toán.")}
+    finally{setPaymentBusy(false)}
+  }
+
+  if (!car) return <div className="loading">Đang tải thông tin xe...</div>;
+
+  return (
+    <div style={{ background: "var(--bg-page)", minHeight: "calc(100vh - 80px)", padding: "20px 0" }}>
+      <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "10px 5vw" }}>
+        <Link href="/cars" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "14px", color: "var(--muted)", fontWeight: 600, marginBottom: "20px" }}>
+          ← Quay lại danh sách xe
+        </Link>
+      </div>
+
+      <section className="detail-layout">
+        {/* CỘT TRÁI: HÌNH ẢNH & THÔNG TIN KỸ THUẬT */}
+        <div className="detail-main">
+          <div className="detail-image-box">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imgSrc}
+              alt={car.name}
+              onError={() => setImgSrc(FALLBACK_DETAIL_IMAGES[0])}
+            />
+          </div>
+
+          <div className="detail-header">
+            <div className="eyebrow">
+              {car.brand?.name} · {car.carType?.name}
+            </div>
+            <h1>{car.name}</h1>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <span className="pill">Biển số: {car.licensePlate || "30G-XXXX"}</span>
+              <span className="pill" style={{ background: "#f1f5f9", color: "var(--ink-secondary)" }}>
+                Khu vực: {car.location || "Toàn quốc"}
+              </span>
+            </div>
+          </div>
+
+          <div className="detail-description">
+            <p>{car.description || "Xe đời mới, trang bị đầy đủ tính năng an toàn, vận hành êm ái, tiết kiệm nhiên liệu."}</p>
+          </div>
+
+          {/* LƯỚI THÔNG SỐ XE */}
+          <div>
+            <h3 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 16px" }}>Thông số kỹ thuật</h3>
+            <div className="specs-grid">
+              <div className="spec-item">
+                <span>Số chỗ ngồi</span>
+                <b>{car.carType?.seats || 5} Ghế</b>
+              </div>
+              <div className="spec-item">
+                <span>Năm sản xuất</span>
+                <b>{car.modelYear || 2023}</b>
+              </div>
+              <div className="spec-item">
+                <span>Hộp số</span>
+                <b>Tự động (AT)</b>
+              </div>
+              <div className="spec-item">
+                <span>Nhiên liệu</span>
+                <b>Xăng / Điện</b>
+              </div>
+            </div>
+          </div>
+
+          {/* CHÍNH SÁCH VÀ ĐIỀU KHOẢN NHẬN XE */}
+          <div className="rental-policy-box">
+            <h3>Giấy tờ & Điều kiện nhận xe</h3>
+            <ul>
+              <li><b>Giấy tờ:</b> CCCD gắn chip (hoặc định danh VNeID mức 2) & Giấy phép lái xe ô tô hạng B1/B2 trở lên còn hiệu lực.</li>
+              <li><b>Tài sản bảo đảm:</b> Xe máy chính chủ kèm cà vẹt (hoặc thế chấp cọc tiền mặt 15.000.000đ khi nhận xe).</li>
+              <li><b>Bảo hiểm:</b> 100% xe được bảo hiểm thân vỏ 2 chiều chính hãng của Bảo Việt/PVI.</li>
+              <li><b>Định mức km:</b> 350km/ngày (Phụ trội: 3.500đ/km).</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* CỘT PHẢI: STICKY BOOKING CARD */}
+        <div className="booking-card-wrapper">
+          <div className="booking-card">
+            <div className="booking-price-header">
+              <div>
+                <strong>{money(car.dailyPrice)}</strong>
+                <span style={{ color: "var(--muted)", fontSize: "14px", marginLeft: "4px" }}>/ ngày</span>
+              </div>
+              <span className="pill">Sẵn sàng</span>
+            </div>
+
+            <div className="booking-form">
+              <div className="date-pickers-row">
+                <label>
+                  Ngày nhận xe
+                  <input
+                    type="date"
+                    value={pickup}
+                    onChange={(e) => setPickup(e.target.value)}
+                    min={new Date().toISOString().split("T")[0]}
+                  />
+                </label>
+                <label>
+                  Ngày trả xe
+                  <input
+                    type="date"
+                    value={returned}
+                    onChange={(e) => setReturned(e.target.value)}
+                    min={pickup || new Date().toISOString().split("T")[0]}
+                  />
+                </label>
+              </div>
+
+              {/* TẠM TÍNH GIÁ TIỀN TỰ ĐỘNG */}
+              <div className="price-summary">
+                <div className="price-row">
+                  <span>Thời gian thuê:</span>
+                  <b>{days} ngày</b>
+                </div>
+                <div className="price-row">
+                  <span>Đơn giá theo ngày:</span>
+                  <span>{money(car.dailyPrice)}</span>
+                </div>
+                <div className="price-row">
+                  <span>Bảo hiểm vật chất 2 chiều:</span>
+                  <span style={{ color: "var(--primary)", fontWeight: 600 }}>Miễn phí</span>
+                </div>
+                <div className="price-row total">
+                  <span>TỔNG CHI PHÍ TẠM TÍNH:</span>
+                  <span style={{ color: "var(--primary)" }}>{money(totalPrice)}</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="button"
+                onClick={book}
+                disabled={submitting}
+              >
+                {submitting ? "Đang xử lý..." : "Xác nhận đặt xe ngay"}
+              </button>
+
+              {msg && <div className="notice">{msg}</div>}
+              {errorMsg && <div className="error-notice">{errorMsg}</div>}
+
+              <div style={{ textAlign: "center", fontSize: "12px", color: "var(--muted)", marginTop: "4px" }}>
+                🔒 Không mất phí hủy trước 24 giờ · Thanh toán an toàn
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      {createdBooking&&<div className="modal-backdrop"><div className="payment-modal auto-payment-modal"><button className="modal-close"onClick={()=>setCreatedBooking(null)}>×</button><div className="eyebrow">ĐƠN THUÊ #{createdBooking.id}</div><h2>Hoàn tất thanh toán</h2><p className="muted">Đơn xe đã được tạo. Thông tin và số tiền bên dưới được điền tự động từ đơn thuê.</p><div className="payment-order"><span>{createdBooking.car?.name||car.name}<small>Tổng tiền đơn thuê</small></span><b>{money(createdBooking.totalAmount)}</b></div><form onSubmit={pay}><div className="form-grid"><label>Họ tên người thanh toán<input required value={paymentForm.payerName}onChange={e=>setPaymentForm({...paymentForm,payerName:e.target.value})}/></label><label>Số điện thoại<input required pattern="[0-9+ ]{9,15}"value={paymentForm.payerPhone}onChange={e=>setPaymentForm({...paymentForm,payerPhone:e.target.value})}placeholder="0988 123 456"/></label><label>Email nhận biên lai<input required type="email"value={paymentForm.payerEmail}onChange={e=>setPaymentForm({...paymentForm,payerEmail:e.target.value})}/></label><label>Số tiền<input required type="number"min="1000"max={createdBooking.totalAmount-createdBooking.paidAmount}step="1000"value={paymentForm.amount}onChange={e=>setPaymentForm({...paymentForm,amount:e.target.value})}/></label><label className="full">Địa chỉ thanh toán<input required value={paymentForm.billingAddress}onChange={e=>setPaymentForm({...paymentForm,billingAddress:e.target.value})}placeholder="Số nhà, đường, quận/huyện, tỉnh/thành"/></label><label>Phương thức thanh toán<select value={paymentForm.method}onChange={e=>setPaymentForm({...paymentForm,method:e.target.value,provider:e.target.value==="BANK_TRANSFER"?"Vietcombank":e.target.value})}>{Object.entries(PAYMENT_METHODS).map(([key,label])=><option key={key}value={key}>{label}</option>)}</select></label><label>Ngân hàng / nhà cung cấp<input required value={paymentForm.provider}onChange={e=>setPaymentForm({...paymentForm,provider:e.target.value})}placeholder="VD: Vietcombank"/></label><label className="full">Ghi chú<textarea rows={3}value={paymentForm.note}onChange={e=>setPaymentForm({...paymentForm,note:e.target.value})}placeholder="Nội dung chuyển khoản hoặc yêu cầu xuất hóa đơn..."/></label></div><p className="secure-note">🔒 Hệ thống không yêu cầu hoặc lưu số thẻ và mã CVV.</p>{errorMsg&&<div className="error-notice">{errorMsg}</div>}{paymentSuccess&&<div className="notice">{paymentSuccess}</div>}<div className="auto-payment-actions"><button type="button"className="ghost"onClick={()=>location.href="/bookings"}>Thanh toán sau</button><button disabled={paymentBusy||!!paymentSuccess}className="button">{paymentBusy?"Đang xử lý...":paymentSuccess?"Đã thanh toán":"Thanh toán ngay"}</button></div></form></div></div>}
+    </div>
+  );
+}
