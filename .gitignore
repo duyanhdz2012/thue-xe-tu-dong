@@ -1,0 +1,11 @@
+backend/target/
+frontend/.next/
+frontend/node_modules/
+.idea/
+.vscode/
+*.iml
+.env*
+uploads/
+tmp/
+tools/
+/thue-xe-tu-dong/

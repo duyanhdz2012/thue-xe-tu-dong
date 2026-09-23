@@ -1,0 +1,2 @@
+package vn.edu.hunre.nhom11.carrental.payment.repository;import java.math.BigDecimal;import java.util.List;import org.springframework.data.jpa.repository.*;import vn.edu.hunre.nhom11.carrental.payment.domain.Payment;public interface PaymentRepository extends JpaRepository<Payment,Long>{List<Payment>findByBookingId(Long bookingId);@Query("select coalesce(sum(p.amount),0) from Payment p where p.status='SUCCESS'")BigDecimal totalRevenue();}
+

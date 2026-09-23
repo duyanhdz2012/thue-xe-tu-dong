@@ -1,0 +1,1 @@
+package vn.edu.hunre.nhom11.carrental;import org.junit.jupiter.api.Test;import org.springframework.boot.test.context.SpringBootTest;@SpringBootTest class CarRentalApplicationTests{@Test void contextLoads(){}}
