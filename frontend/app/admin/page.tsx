@@ -65,7 +65,8 @@ type Car = {
 
 type Brand = { id: number; name: string };
 type CarType = { id: number; name: string; seats: number };
-type Tab = "overview" | "cars" | "bookings" | "customers" | "payments";
+type WebhookInfo = { endpointPath: string; authentication: "NONE" | "API_KEY"; pendingPayments: number };
+type Tab = "overview" | "cars" | "bookings" | "customers" | "payments" | "webhooks";
 
 const statusName: Record<string, string> = {
   PENDING: "Chờ duyệt",
@@ -102,6 +103,9 @@ export default function Admin() {
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [webhookInfo, setWebhookInfo] = useState<WebhookInfo | null>(null);
+  const [webhookBaseUrl, setWebhookBaseUrl] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const emptyCar = {
     name: "",
@@ -121,7 +125,7 @@ export default function Admin() {
     try {
       setError("");
       setRefreshing(true);
-      const [s, b, u, p, c, br, t] = await Promise.all([
+      const [s, b, u, p, c, br, t, wh] = await Promise.all([
         api<Stats>("/api/dashboard"),
         api<Booking[]>("/api/bookings"),
         api<User[]>("/api/users"),
@@ -129,6 +133,7 @@ export default function Admin() {
         api<{ content: Car[] }>("/api/cars?size=100&sort=createdAt,desc"),
         api<Brand[]>("/api/brands"),
         api<CarType[]>("/api/car-types"),
+        api<WebhookInfo>("/api/payments/sepay/info"),
       ]);
       setStats(s);
       setBookings(b);
@@ -137,6 +142,7 @@ export default function Admin() {
       setCars(c.content);
       setBrands(br);
       setCarTypes(t);
+      setWebhookInfo(wh);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -148,6 +154,7 @@ export default function Admin() {
     if (getSession()?.role !== "ADMIN") {
       location.href = "/login";
     } else {
+      setWebhookBaseUrl(localStorage.getItem("sepayWebhookBaseUrl") || "");
       void load();
     }
   }, []);
@@ -370,6 +377,10 @@ export default function Admin() {
       title: "Lịch sử giao dịch & Thanh toán",
       subtitle: "Toàn bộ dòng tiền đặt cọc, thanh toán online và biên lai hoàn tất qua hệ thống",
     },
+    webhooks: {
+      title: "Tích hợp SePay Webhook",
+      subtitle: "Nhận giao dịch chuyển khoản từ SePay và tự động xác nhận thanh toán đơn thuê xe",
+    },
   };
 
   return (
@@ -469,13 +480,13 @@ export default function Admin() {
               <span>{refreshing ? "Đang tải..." : "Làm mới"}</span>
             </button>
 
-            <button className="admin-btn-primary" onClick={() => openCar()}>
+            {tab === "cars" && <button className="admin-btn-primary" onClick={() => openCar()}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19"></line>
                 <line x1="5" y1="12" x2="19" y2="12"></line>
               </svg>
               <span>+ Thêm xe mới</span>
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -942,8 +953,8 @@ export default function Admin() {
                           <span className="admin-cell-title" style={{ fontFamily: "monospace", fontSize: "14px" }}>
                             {p.transactionCode}
                           </span>
-                          <span className="admin-badge completed" style={{ marginTop: "4px" }}>
-                            ✓ {statusName[p.status] || p.status}
+                          <span className={`admin-badge ${p.status.toLowerCase()}`} style={{ marginTop: "4px" }}>
+                            {p.status === "SUCCESS" ? "✓ " : ""}{p.status === "PENDING" ? "Chờ SePay" : statusName[p.status] || p.status}
                           </span>
                         </td>
                         <td>
@@ -984,6 +995,82 @@ export default function Admin() {
             </div>
           </>
         )}
+
+        {/* ================= TAB 6: SEPAY WEBHOOK ================= */}
+        {tab === "webhooks" && (() => {
+          const endpoint = webhookBaseUrl
+            ? `${webhookBaseUrl.replace(/\/$/, "")}${webhookInfo?.endpointPath || "/api/payments/sepay/webhook"}`
+            : "";
+          return (
+            <div className="webhook-layout">
+              <div className="webhook-card webhook-hero-card">
+                <div>
+                  <span className="webhook-kicker">SEPAY · CÓ TIỀN VÀO</span>
+                  <h2>Webhook xác nhận chuyển khoản</h2>
+                  <p>SePay gửi giao dịch vào endpoint công khai. Hệ thống tìm mã dạng <b>CAR&lt;đơn&gt;-XXXXXX</b>, kiểm tra đúng số tiền và chỉ sau đó mới ghi nhận thanh toán.</p>
+                </div>
+                <div className="webhook-status-stack">
+                  <span className="webhook-live"><i /> Endpoint sẵn sàng</span>
+                  <span>{webhookInfo?.pendingPayments || 0} giao dịch đang chờ</span>
+                </div>
+              </div>
+
+              <div className="webhook-grid">
+                <div className="webhook-card">
+                  <h3>1. Địa chỉ ngrok công khai</h3>
+                  <p className="webhook-muted">Dán URL HTTPS do ngrok cấp. Trang sẽ ghép tự động với đường dẫn webhook.</p>
+                  <label className="webhook-label">NGROK BASE URL</label>
+                  <input
+                    className="webhook-input"
+                    value={webhookBaseUrl}
+                    onChange={(e) => {
+                      setWebhookBaseUrl(e.target.value.trim());
+                      localStorage.setItem("sepayWebhookBaseUrl", e.target.value.trim());
+                    }}
+                    placeholder="https://your-domain.ngrok-free.app"
+                  />
+                  <label className="webhook-label">URL NHẬP VÀO SEPAY</label>
+                  <div className="webhook-copy-row">
+                    <code>{endpoint || "Nhập URL ngrok ở trên"}</code>
+                    <button
+                      className="admin-btn-secondary"
+                      disabled={!endpoint}
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(endpoint);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }}
+                    >{copied ? "Đã sao chép" : "Sao chép"}</button>
+                  </div>
+                </div>
+
+                <div className="webhook-card">
+                  <h3>2. Cấu hình trên SePay</h3>
+                  <div className="webhook-config-list">
+                    <div><span>Sự kiện</span><b>Có tiền vào</b></div>
+                    <div><span>Content-Type</span><b>application/json</b></div>
+                    <div><span>Xác thực</span><b>{webhookInfo?.authentication === "API_KEY" ? "API Key" : "Không xác thực (local)"}</b></div>
+                    <div><span>Tiền tố lọc</span><b>CAR</b></div>
+                  </div>
+                  {webhookInfo?.authentication === "NONE" && (
+                    <div className="webhook-warning">Khi triển khai thật, hãy đặt biến <code>SEPAY_WEBHOOK_API_KEY</code> và chọn xác thực API Key trên SePay.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="webhook-card">
+                <h3>3. Quy trình kiểm tra</h3>
+                <div className="webhook-steps">
+                  <span><b>1</b> Khách chọn chuyển khoản và nhận mã CAR...</span>
+                  <span><b>2</b> Nội dung chuyển khoản phải chứa đúng mã</span>
+                  <span><b>3</b> SePay gửi webhook “Có tiền vào”</span>
+                  <span><b>4</b> Website xác minh mã, số tiền và chống gửi trùng</span>
+                </div>
+                <p className="webhook-muted">Webhook hợp lệ trả HTTP 200 cùng <code>{`{"success":true}`}</code>. Có thể dùng nút “Gửi thử” trong trang chi tiết webhook của SePay.</p>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ================= MODAL: THÊM / SỬA XE ================= */}

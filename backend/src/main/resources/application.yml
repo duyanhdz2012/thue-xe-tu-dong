@@ -22,7 +22,8 @@ app:
   jwt:
     secret: ${JWT_SECRET:car-rental-modular-monolith-secret-key-must-be-at-least-32-bytes}
     expiration-minutes: 480
+  sepay:
+    webhook-api-key: ${SEPAY_WEBHOOK_API_KEY:}
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
-

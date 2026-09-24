@@ -3,6 +3,7 @@
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { api, money, getSession } from "@/lib/api";
+import { BANK_TRANSFER, transferContent, vietQrUrl } from "@/lib/payment";
 import { Car } from "@/components/CarCard";
 
 const FALLBACK_DETAIL_IMAGES = [
@@ -13,9 +14,8 @@ const FALLBACK_DETAIL_IMAGES = [
 
 type BookingResult={id:number;totalAmount:number;paidAmount:number;car:{name:string}};
 type Profile={name:string;email:string;phone:string;address:string};
-type PaymentResult={transactionCode:string};
+type PaymentResult={transactionCode:string;status:"PENDING"|"SUCCESS";amount:number};
 type BusyRange={pickupDate:string;returnDate:string};
-const PAYMENT_METHODS:Record<string,string>={BANK_TRANSFER:"Chuyển khoản ngân hàng",MOMO:"Ví MoMo",VNPAY:"VNPay",CASH:"Tiền mặt tại quầy"};
 
 const localToday = () => {
   const now = new Date();
@@ -40,10 +40,11 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
   const [createdBooking,setCreatedBooking]=useState<BookingResult|null>(null);
   const [paymentBusy,setPaymentBusy]=useState(false);
   const [paymentSuccess,setPaymentSuccess]=useState("");
+  const [pendingPayment,setPendingPayment]=useState<PaymentResult|null>(null);
   const [busyRanges,setBusyRanges]=useState<BusyRange[]>([]);
   const [availabilityLoading,setAvailabilityLoading]=useState(true);
   const [availabilityError,setAvailabilityError]=useState("");
-  const [paymentForm,setPaymentForm]=useState({amount:"",method:"BANK_TRANSFER",payerName:"",payerEmail:"",payerPhone:"",billingAddress:"",provider:"Vietcombank",note:""});
+  const [paymentForm,setPaymentForm]=useState({amount:"",payerName:"",payerEmail:"",payerPhone:""});
 
   async function refreshBusyDates() {
     try {
@@ -138,11 +139,13 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
           returnLocation: car?.location
         })
       });
+      setPendingPayment(null);
+      setPaymentSuccess("");
       setCreatedBooking(booking);
       setPaymentForm(f=>({...f,amount:String(booking.totalAmount-booking.paidAmount)}));
       try {
         const profile=await api<Profile>("/api/users/me");
-        setPaymentForm(f=>({...f,payerName:profile.name,payerEmail:profile.email,payerPhone:profile.phone||"",billingAddress:profile.address||""}));
+        setPaymentForm(f=>({...f,payerName:profile.name,payerEmail:profile.email,payerPhone:profile.phone||""}));
       } catch {
         // Đơn vẫn đã được tạo: giữ biểu mẫu thanh toán mở để khách tự bổ sung thông tin.
       }
@@ -157,10 +160,44 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
 
   async function pay(e:React.FormEvent){
     e.preventDefault();if(!createdBooking)return;
-    try{setPaymentBusy(true);setErrorMsg("");const result=await api<PaymentResult>("/api/payments",{method:"POST",body:JSON.stringify({...paymentForm,bookingId:createdBooking.id,amount:Number(paymentForm.amount)})});setPaymentSuccess(`Thanh toán thành công. Mã giao dịch: ${result.transactionCode}`);setMsg("🎉 Đặt xe và thanh toán thành công! Bạn có thể theo dõi hành trình trong Đơn của tôi.")}
+    try{setPaymentBusy(true);setErrorMsg("");const result=await api<PaymentResult>("/api/payments",{method:"POST",body:JSON.stringify({...paymentForm,bookingId:createdBooking.id,amount:Number(paymentForm.amount),method:"BANK_TRANSFER",provider:BANK_TRANSFER.bank})});setPendingPayment(result);if(result.status==="PENDING"){setPaymentSuccess(`Đang chờ chuyển khoản. Nội dung bắt buộc: ${transferContent(result.transactionCode)}`);setMsg("Đơn đã được tạo và đang chờ SePay xác nhận chuyển khoản.")}else{setPaymentSuccess(`Thanh toán thành công. Mã giao dịch: ${result.transactionCode}`);setMsg("🎉 Đặt xe và thanh toán thành công! Bạn có thể theo dõi hành trình trong Đơn của tôi.")}}
     catch(e){setErrorMsg((e as Error).message||"Không thể hoàn tất thanh toán.")}
     finally{setPaymentBusy(false)}
   }
+
+  useEffect(() => {
+    if (!createdBooking || !pendingPayment || pendingPayment.status !== "PENDING") return;
+    let cancelled = false;
+    const checkPayment = async () => {
+      try {
+        const payments = await api<PaymentResult[]>(`/api/payments/${createdBooking.id}`);
+        const confirmed = payments.find((payment) =>
+          payment.transactionCode === pendingPayment.transactionCode && payment.status === "SUCCESS"
+        );
+        if (!cancelled && confirmed) {
+          setPendingPayment(confirmed);
+          setPaymentSuccess(`Thanh toán thành công. Mã giao dịch: ${confirmed.transactionCode}`);
+          setMsg("🎉 Đặt xe và thanh toán thành công! Đang chuyển tới Đơn của tôi...");
+        }
+      } catch {
+        // Tiếp tục kiểm tra ở lượt sau nếu mạng tạm thời gián đoạn.
+      }
+    };
+    void checkPayment();
+    const timer = window.setInterval(checkPayment, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [createdBooking, pendingPayment]);
+
+  useEffect(() => {
+    if (pendingPayment?.status !== "SUCCESS") return;
+    const timer = window.setTimeout(() => {
+      window.location.href = "/bookings";
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [pendingPayment?.status]);
 
   if (!car) return <div className="loading">Đang tải thông tin xe...</div>;
 
@@ -340,7 +377,39 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
           </div>
         </div>
       </section>
-      {createdBooking&&<div className="modal-backdrop"><div className="payment-modal auto-payment-modal"><button className="modal-close"onClick={()=>setCreatedBooking(null)}>×</button><div className="eyebrow">ĐƠN THUÊ #{createdBooking.id}</div><h2>Hoàn tất thanh toán</h2><p className="muted">Đơn xe đã được tạo. Thông tin và số tiền bên dưới được điền tự động từ đơn thuê.</p><div className="payment-order"><span>{createdBooking.car?.name||car.name}<small>Tổng tiền đơn thuê</small></span><b>{money(createdBooking.totalAmount)}</b></div><form onSubmit={pay}><div className="form-grid"><label>Họ tên người thanh toán<input required value={paymentForm.payerName}onChange={e=>setPaymentForm({...paymentForm,payerName:e.target.value})}/></label><label>Số điện thoại<input required pattern="[0-9+ ]{9,15}"value={paymentForm.payerPhone}onChange={e=>setPaymentForm({...paymentForm,payerPhone:e.target.value})}placeholder="0988 123 456"/></label><label>Email nhận biên lai<input required type="email"value={paymentForm.payerEmail}onChange={e=>setPaymentForm({...paymentForm,payerEmail:e.target.value})}/></label><label>Số tiền<input required type="number"min="1000"max={createdBooking.totalAmount-createdBooking.paidAmount}step="1000"value={paymentForm.amount}onChange={e=>setPaymentForm({...paymentForm,amount:e.target.value})}/></label><label className="full">Địa chỉ thanh toán<input required value={paymentForm.billingAddress}onChange={e=>setPaymentForm({...paymentForm,billingAddress:e.target.value})}placeholder="Số nhà, đường, quận/huyện, tỉnh/thành"/></label><label>Phương thức thanh toán<select value={paymentForm.method}onChange={e=>setPaymentForm({...paymentForm,method:e.target.value,provider:e.target.value==="BANK_TRANSFER"?"Vietcombank":e.target.value})}>{Object.entries(PAYMENT_METHODS).map(([key,label])=><option key={key}value={key}>{label}</option>)}</select></label><label>Ngân hàng / nhà cung cấp<input required value={paymentForm.provider}onChange={e=>setPaymentForm({...paymentForm,provider:e.target.value})}placeholder="VD: Vietcombank"/></label><label className="full">Ghi chú<textarea rows={3}value={paymentForm.note}onChange={e=>setPaymentForm({...paymentForm,note:e.target.value})}placeholder="Nội dung chuyển khoản hoặc yêu cầu xuất hóa đơn..."/></label></div><p className="secure-note">🔒 Hệ thống không yêu cầu hoặc lưu số thẻ và mã CVV.</p>{errorMsg&&<div className="error-notice">{errorMsg}</div>}{paymentSuccess&&<div className="notice">{paymentSuccess}</div>}<div className="auto-payment-actions"><button type="button"className="ghost"onClick={()=>location.href="/bookings"}>Thanh toán sau</button><button disabled={paymentBusy||!!paymentSuccess}className="button">{paymentBusy?"Đang xử lý...":paymentSuccess?"Đã thanh toán":"Thanh toán ngay"}</button></div></form></div></div>}
+      {createdBooking && <div className="modal-backdrop"><div className="payment-modal auto-payment-modal">
+        <button className="modal-close" onClick={()=>setCreatedBooking(null)}>×</button>
+        <div className="eyebrow">ĐƠN THUÊ #{createdBooking.id}</div>
+        <h2>Thanh toán chuyển khoản</h2>
+        <p className="muted">Thông tin ngân hàng và số tiền được điền tự động theo đơn thuê.</p>
+        <div className="payment-order"><span>{createdBooking.car?.name||car.name}<small>Tổng tiền đơn thuê</small></span><b>{money(createdBooking.totalAmount)}</b></div>
+        <form onSubmit={pay}>
+          <div className="form-grid">
+            <label>Họ tên người thanh toán<input required value={paymentForm.payerName} onChange={e=>setPaymentForm({...paymentForm,payerName:e.target.value})}/></label>
+            <label>Số điện thoại<input required pattern="[0-9+ ]{9,15}" value={paymentForm.payerPhone} onChange={e=>setPaymentForm({...paymentForm,payerPhone:e.target.value})} placeholder="0988 123 456"/></label>
+            <label>Email nhận biên lai<input required type="email" value={paymentForm.payerEmail} onChange={e=>setPaymentForm({...paymentForm,payerEmail:e.target.value})}/></label>
+            <label>Số tiền<input className="locked-payment-input" readOnly value={paymentForm.amount}/></label>
+          </div>
+          <div className="bank-auto-info">
+            <div><span>Ngân hàng</span><b>{BANK_TRANSFER.bank}</b></div>
+            <div><span>Số tài khoản</span><b>{BANK_TRANSFER.accountNumber}</b></div>
+            <div><span>Chủ tài khoản</span><b>{BANK_TRANSFER.accountHolder}</b></div>
+          </div>
+          {pendingPayment?.status === "PENDING" && <div className="vietqr-payment">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={vietQrUrl(pendingPayment.amount,pendingPayment.transactionCode)} alt="Mã QR chuyển khoản VietinBank"/>
+            <div className="transfer-details">
+              <h3>Quét QR để chuyển khoản</h3>
+              <p><span>Số tiền</span><b>{money(pendingPayment.amount)}</b></p>
+              <p><span>Nội dung</span><strong>{transferContent(pendingPayment.transactionCode)}</strong></p>
+              <small>Vui lòng giữ nguyên số tiền và nội dung để SePay xác nhận tự động.</small>
+            </div>
+          </div>}
+          {errorMsg&&<div className="error-notice">{errorMsg}</div>}
+          {paymentSuccess&&<div className="notice">{paymentSuccess}</div>}
+          <div className="auto-payment-actions"><button type="button" className="ghost" onClick={()=>location.href="/bookings"}>Thanh toán sau</button><button disabled={paymentBusy||!!paymentSuccess} className="button">{paymentBusy?"Đang tạo mã QR...":pendingPayment?.status==="SUCCESS"?"Đã thanh toán":paymentSuccess?"Đang chờ SePay":"Tạo mã QR thanh toán"}</button></div>
+        </form>
+      </div></div>}
     </div>
   );
 }
