@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: auth-service
+              uri: ${AUTH_SERVICE_URL:http://127.0.0.1:8081}
+              predicates:
+                - Path=/api/auth/**,/api/users/**
+            - id: car-service
+              uri: ${CAR_SERVICE_URL:http://127.0.0.1:8082}
+              predicates:
+                - Path=/api/cars/**,/api/brands/**,/api/car-types/**,/api/news/**
+            - id: booking-service
+              uri: ${BOOKING_SERVICE_URL:http://127.0.0.1:8083}
+              predicates:
+                - Path=/api/bookings/**,/api/payments/**,/api/dashboard/**
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origins:
+                  - http://localhost:3000
+                  - http://127.0.0.1:3000
+                  - http://192.168.75.1:3000
+                allowed-methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+                allowed-headers: '*'
+                exposed-headers: [Location]
+                max-age: 3600
+            add-to-simple-url-handler-mapping: true
+server:
+  port: 8080
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,gateway
