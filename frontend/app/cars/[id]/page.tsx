@@ -14,7 +14,19 @@ const FALLBACK_DETAIL_IMAGES = [
 type BookingResult={id:number;totalAmount:number;paidAmount:number;car:{name:string}};
 type Profile={name:string;email:string;phone:string;address:string};
 type PaymentResult={transactionCode:string};
+type BusyRange={pickupDate:string;returnDate:string};
 const PAYMENT_METHODS:Record<string,string>={BANK_TRANSFER:"Chuyển khoản ngân hàng",MOMO:"Ví MoMo",VNPAY:"VNPay",CASH:"Tiền mặt tại quầy"};
+
+const localToday = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().split("T")[0];
+};
+
+const displayDate = (value:string) => new Intl.DateTimeFormat("vi-VN", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric"
+}).format(new Date(`${value}T00:00:00`));
 
 export default function Detail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -28,9 +40,25 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
   const [createdBooking,setCreatedBooking]=useState<BookingResult|null>(null);
   const [paymentBusy,setPaymentBusy]=useState(false);
   const [paymentSuccess,setPaymentSuccess]=useState("");
+  const [busyRanges,setBusyRanges]=useState<BusyRange[]>([]);
+  const [availabilityLoading,setAvailabilityLoading]=useState(true);
+  const [availabilityError,setAvailabilityError]=useState("");
   const [paymentForm,setPaymentForm]=useState({amount:"",method:"BANK_TRANSFER",payerName:"",payerEmail:"",payerPhone:"",billingAddress:"",provider:"Vietcombank",note:""});
 
+  async function refreshBusyDates() {
+    try {
+      setAvailabilityLoading(true);
+      setAvailabilityError("");
+      setBusyRanges(await api<BusyRange[]>(`/api/bookings/cars/${id}/busy-dates`));
+    } catch {
+      setAvailabilityError("Chưa tải được lịch đã đặt. Hệ thống vẫn sẽ kiểm tra lại khi xác nhận.");
+    } finally {
+      setAvailabilityLoading(false);
+    }
+  }
+
   useEffect(() => {
+    refreshBusyDates();
     api<Car>(`/api/cars/${id}`)
       .then((data) => {
         setCar(data);
@@ -70,6 +98,9 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
 
   const days = calculateDays();
   const totalPrice = car ? car.dailyPrice * days : 0;
+  const selectedConflict = Boolean(pickup && returned && busyRanges.some(
+    (range) => pickup <= range.returnDate && returned >= range.pickupDate
+  ));
 
   async function book() {
     setErrorMsg("");
@@ -87,6 +118,11 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
 
     if (new Date(returned).getTime() < new Date(pickup).getTime()) {
       setErrorMsg("Ngày trả xe không thể trước ngày nhận xe.");
+      return;
+    }
+
+    if (selectedConflict) {
+      setErrorMsg("Khoảng ngày này có ngày xe đã được đặt. Vui lòng chọn thời gian khác.");
       return;
     }
 
@@ -111,6 +147,7 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
         // Đơn vẫn đã được tạo: giữ biểu mẫu thanh toán mở để khách tự bổ sung thông tin.
       }
       setMsg("Đặt xe thành công. Vui lòng hoàn tất thanh toán để xác nhận hành trình.");
+      await refreshBusyDates();
     } catch (e) {
       setErrorMsg((e as Error).message || "Không thể hoàn tất đặt xe. Vui lòng thử lại.");
     } finally {
@@ -207,7 +244,7 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
                 <strong>{money(car.dailyPrice)}</strong>
                 <span style={{ color: "var(--muted)", fontSize: "14px", marginLeft: "4px" }}>/ ngày</span>
               </div>
-              <span className="pill">Sẵn sàng</span>
+              <span className="pill">{selectedConflict ? "Đã có lịch" : "Sẵn sàng"}</span>
             </div>
 
             <div className="booking-form">
@@ -217,8 +254,13 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
                   <input
                     type="date"
                     value={pickup}
-                    onChange={(e) => setPickup(e.target.value)}
-                    min={new Date().toISOString().split("T")[0]}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setPickup(value);
+                      if (returned && returned < value) setReturned("");
+                      setErrorMsg("");
+                    }}
+                    min={localToday()}
                   />
                 </label>
                 <label>
@@ -226,11 +268,38 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
                   <input
                     type="date"
                     value={returned}
-                    onChange={(e) => setReturned(e.target.value)}
-                    min={pickup || new Date().toISOString().split("T")[0]}
+                    onChange={(e) => { setReturned(e.target.value); setErrorMsg(""); }}
+                    min={pickup || localToday()}
                   />
                 </label>
               </div>
+
+              <div className="busy-calendar" aria-live="polite">
+                <div className="busy-calendar-title">
+                  <span>Lịch xe đã được đặt</span>
+                  <span className="busy-dot">Ngày không thể chọn</span>
+                </div>
+                {availabilityLoading ? (
+                  <p>Đang tải lịch xe...</p>
+                ) : busyRanges.length > 0 ? (
+                  <div className="busy-range-list">
+                    {busyRanges.map((range) => (
+                      <span className="busy-range" key={`${range.pickupDate}-${range.returnDate}`}>
+                        {displayDate(range.pickupDate)} – {displayDate(range.returnDate)}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p>Xe chưa có lịch đặt sắp tới.</p>
+                )}
+                {availabilityError && <p className="availability-warning">{availabilityError}</p>}
+              </div>
+
+              {selectedConflict && (
+                <div className="date-conflict" role="alert">
+                  Khoảng thời gian đã chọn trùng với lịch đặt phía trên. Hãy chọn ngày khác.
+                </div>
+              )}
 
               {/* TẠM TÍNH GIÁ TIỀN TỰ ĐỘNG */}
               <div className="price-summary">
@@ -256,9 +325,9 @@ export default function Detail({ params }: { params: Promise<{ id: string }> }) 
                 type="button"
                 className="button"
                 onClick={book}
-                disabled={submitting}
+                disabled={submitting || availabilityLoading || selectedConflict}
               >
-                {submitting ? "Đang xử lý..." : "Xác nhận đặt xe ngay"}
+                {submitting ? "Đang xử lý..." : selectedConflict ? "Khoảng ngày đã được đặt" : "Xác nhận đặt xe ngay"}
               </button>
 
               {msg && <div className="notice">{msg}</div>}

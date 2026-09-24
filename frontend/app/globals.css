@@ -1097,6 +1097,76 @@ button, input, select, textarea {
   background: #ffffff;
 }
 
+.busy-calendar {
+  padding: 14px;
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius-sm);
+  background: #fffaf5;
+}
+
+.busy-calendar-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.busy-calendar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.busy-dot {
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.busy-dot::before {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #f97316;
+  content: "";
+}
+
+.busy-range-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.busy-range {
+  padding: 7px 9px;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.busy-calendar .availability-warning {
+  margin-top: 9px;
+  color: #b45309;
+}
+
+.date-conflict {
+  padding: 11px 13px;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .price-summary {
   background: var(--bg-page);
   padding: 16px;
