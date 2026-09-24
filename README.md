@@ -1,86 +1,172 @@
-# Car Rental Modular Monolith
+# DriveNow - Car Rental Microservices
 
-Full-stack self-drive car rental project based on the supplied report. The backend is one deployable Spring Boot application split into business modules; the frontend is a Next.js application.
+Dự án thuê xe tự lái đã được tách từ modular monolith thành các ứng dụng độc lập, theo mẫu `api-gateway / auth-service / domain-service / frontend / docs`.
 
-## Modules
+## Cấu trúc
 
-- `identity`: registration, login, JWT, users and roles
-- `catalog`: brands, car types and cars
-- `booking`: rental orders, availability and status workflow
-- `payment`: deposits and payment records
-- `content`: news
-- `dashboard`: admin statistics
-- `shared`: security, errors and cross-module configuration
+```text
+.
+├── api-gateway/          Spring Cloud Gateway, cổng 8080
+├── auth-service/         đăng ký, đăng nhập, JWT, người dùng, cổng 8081
+├── car-service/          xe, hãng xe, loại xe, tin tức, cổng 8082
+├── booking-service/      đặt xe, thanh toán, dashboard, cổng 8083
+├── car-rental-frontend/  Next.js, cổng 3000
+├── docs/                 kiến trúc và SQL tham khảo
+├── docker-compose.yml    MySQL cổng 3307
+└── pom.xml               Maven reactor build cho toàn bộ backend
+```
 
-## Chạy dự án với MySQL (không mất dữ liệu)
+Website được mở tại `http://localhost:3000`. Frontend gửi API tới Gateway tại `http://localhost:8080`, sau đó Gateway tự chuyển request sang đúng service.
 
-Dự án dùng MySQL trong Docker, cổng `3307`, database `car_rental`. Dữ liệu được lưu trong Docker volume `car_rental_mysql`, vì vậy tắt backend, frontend, Docker Desktop hoặc chạy `docker compose down` sẽ không làm mất dữ liệu.
+> Không mở `http://localhost:8080` để sử dụng website. Cổng `8080` chỉ dành cho API và có thể trả về `403` hoặc `404` tại đường dẫn gốc.
 
-Yêu cầu: Java 21, Docker Desktop và Node.js đã được cài đặt.
+## Yêu cầu
 
-### Terminal 1 - Khởi động MySQL
+- Java 21
+- Maven 3.9+
+- Node.js 22+
+- Docker Desktop
 
-Mở PowerShell tại thư mục gốc của dự án:
+## Build toàn bộ backend
 
 ```powershell
+mvn clean package -DskipTests
+```
+
+Nếu máy chưa có Maven trong `PATH`, dùng Maven đi kèm IntelliJ:
+
+```powershell
+& "C:\Program Files\JetBrains\IntelliJ IDEA 2026.1.1\plugins\maven\lib\maven3\bin\mvn.cmd" clean package -DskipTests
+```
+
+## Chạy đầy đủ với MySQL không mất dữ liệu
+
+Mỗi khối bên dưới phải chạy trong một cửa sổ PowerShell riêng. Thư mục gốc dự án là:
+
+```powershell
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI"
+```
+
+### Terminal 1 - MySQL
+
+```powershell
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI"
 docker compose up -d mysql
 docker compose ps
 ```
 
-Chờ đến khi container `mysql` có trạng thái `healthy`.
+Chờ container `websitethuxettli-mysql-1` có trạng thái `healthy`. MySQL chạy tại `localhost:3307` và dữ liệu được lưu trong Docker volume.
 
-### Terminal 2 - Khởi động backend bằng profile MySQL
-
-Nếu backend cũ đang chạy, hãy nhấn `Ctrl + C` ở terminal cũ trước khi build. Nếu không, Windows có thể khóa file JAR và Maven báo `Failed to delete ... car-rental-1.0.0.jar`.
+### Terminal 2 - Auth Service
 
 ```powershell
-cd backend
-& "C:\Program Files\JetBrains\IntelliJ IDEA 2026.1.1\plugins\maven\lib\maven3\bin\mvn.cmd" clean package -DskipTests
-java -jar target\car-rental-1.0.0.jar --spring.profiles.active=mysql
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI"
+java -jar auth-service\target\auth-service-1.0.0.jar --spring.profiles.active=mysql
 ```
 
-Nếu máy đã cài Maven và lệnh `mvn` hoạt động, có thể thay dòng Maven của IntelliJ bằng `mvn clean package -DskipTests`.
+Kết quả mong đợi: Auth Service chạy ở cổng `8081` và log có kết nối MySQL `8.4`.
 
-Phải có tham số `--spring.profiles.active=mysql`. Nếu chạy JAR không có tham số này, ứng dụng có thể dùng H2 và bạn sẽ không thấy dữ liệu MySQL.
-
-- Backend: http://localhost:8080
-- Swagger: http://localhost:8080/swagger-ui.html
-
-### Terminal 3 - Khởi động frontend
+### Terminal 3 - Car Service
 
 ```powershell
-cd frontend
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI"
+java -jar car-service\target\car-service-1.0.0.jar --spring.profiles.active=mysql
+```
+
+Kết quả mong đợi: Car Service chạy ở cổng `8082`.
+
+### Terminal 4 - Booking Service
+
+```powershell
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI"
+java -jar booking-service\target\booking-service-1.0.0.jar --spring.profiles.active=mysql
+```
+
+Kết quả mong đợi: Booking Service chạy ở cổng `8083`.
+
+### Terminal 5 - API Gateway
+
+```powershell
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI"
+java -jar api-gateway\target\api-gateway-1.0.0.jar
+```
+
+Kiểm tra Gateway trong một PowerShell khác:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/actuator/health
+```
+
+Kết quả phải có `status` bằng `UP`.
+
+### Terminal 6 - Frontend
+
+```powershell
+cd "J:\WEBSITE THUÊ XE Ô TÔ TỰ LÁI\car-rental-frontend"
 npm install
 npm run dev
 ```
 
-Mở http://localhost:3000.
+Chỉ cần chạy `npm install` lần đầu hoặc khi `package.json` thay đổi. Sau đó mở website:
 
-Nếu đã cài `pnpm`, có thể thay hai lệnh trên bằng `pnpm install` và `pnpm dev`.
+```text
+http://localhost:3000
+```
 
-## Tắt và chạy lại mà không mất database
+## Terminal 7 - Ngrok cho webhook SePay (tùy chọn)
 
-Tắt backend/frontend bằng `Ctrl + C`, sau đó có thể dừng container:
+Ngrok phải chuyển tiếp vào API Gateway ở cổng `8080`, không phải cổng `80`:
+
+```powershell
+C:\ngrok.exe http 8080
+```
+
+Webhook cấu hình trên SePay:
+
+```text
+https://walton-noninterpretational-unspeakably.ngrok-free.dev/api/payments/sepay/webhook
+```
+
+Nếu ngrok báo `ERR_NGROK_334`, domain này đã được một tiến trình ngrok khác sử dụng. Không mở tunnel thứ hai; có thể kiểm tra tunnel hiện tại tại `http://127.0.0.1:4040`.
+
+## Dừng và chạy lại
+
+Dừng backend, Gateway, frontend hoặc ngrok bằng `Ctrl + C` trong đúng Terminal của ứng dụng đó.
+
+Dừng MySQL mà không xóa dữ liệu:
 
 ```powershell
 docker compose stop mysql
 ```
 
-Lần sau chạy lại:
+Chạy lại MySQL và tái sử dụng dữ liệu cũ:
 
 ```powershell
-docker compose start mysql
+docker compose up -d mysql
 ```
 
-Hoặc luôn dùng `docker compose up -d mysql`; Docker sẽ tái sử dụng volume dữ liệu cũ.
+> Không chạy `docker compose down -v`. Tham số `-v` sẽ xóa Docker volume và toàn bộ dữ liệu MySQL của dự án.
 
-> **Cảnh báo:** Không chạy `docker compose down -v` hoặc xóa volume `car_rental_mysql`. Tham số `-v` sẽ xóa toàn bộ dữ liệu MySQL của dự án.
+## Xử lý lỗi 403
+
+- Đảm bảo đang mở website tại `http://localhost:3000`, không phải `http://localhost:8080`.
+- Đảm bảo cả ba service và Gateway đều đang chạy.
+- Nếu vừa chuyển từ H2 sang MySQL, hãy đăng xuất rồi đăng nhập lại để thay JWT cũ.
+- Kiểm tra Gateway bằng `Invoke-RestMethod http://localhost:8080/actuator/health`.
 
 ## Tài khoản mẫu
 
 - Admin: `admin@carrental.vn` / `Admin@123`
 - Customer: `customer@carrental.vn` / `Customer@123`
 
-## Cấu hình tùy chỉnh
+## Cấu hình
 
-Có thể ghi đè cấu hình bằng các biến môi trường `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET` và `NEXT_PUBLIC_API_URL`.
+Các service dùng chung `JWT_SECRET`; khi đổi secret phải đặt cùng một giá trị cho `auth-service`, `car-service` và `booking-service`.
+
+- `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`: kết nối MySQL
+- `JWT_SECRET`: khóa ký/xác minh JWT dùng chung
+- `AUTH_SERVICE_URL`, `CAR_SERVICE_URL`, `BOOKING_SERVICE_URL`: địa chỉ nội bộ giữa các service
+- `SEPAY_WEBHOOK_API_KEY`: khóa bảo vệ webhook SePay
+- `NEXT_PUBLIC_API_URL`: URL gateway phía frontend
+
+Dữ liệu MySQL cũ không bị xóa. Booking và payment mới dùng bảng `rental_bookings` và `rental_payments`, tránh thay đổi quan hệ khóa ngoại của bảng monolith cũ.

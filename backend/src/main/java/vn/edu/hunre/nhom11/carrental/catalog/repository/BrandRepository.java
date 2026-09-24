@@ -1,1 +1,0 @@
-package vn.edu.hunre.nhom11.carrental.catalog.repository; import org.springframework.data.jpa.repository.JpaRepository; import vn.edu.hunre.nhom11.carrental.catalog.domain.Brand; public interface BrandRepository extends JpaRepository<Brand,Long>{}

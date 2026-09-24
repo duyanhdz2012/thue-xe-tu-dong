@@ -1,6 +1,6 @@
-backend/target/
-frontend/.next/
-frontend/node_modules/
+**/target/
+car-rental-frontend/.next/
+car-rental-frontend/node_modules/
 .idea/
 .vscode/
 *.iml
